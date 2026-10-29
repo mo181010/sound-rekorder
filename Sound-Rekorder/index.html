@@ -1,0 +1,109 @@
+<!doctype html><html lang="de"><head><meta charset="utf-8"><title>Sound Rekorder</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; media-src 'self' file:">
+<style>
+:root{--bg:#150f1f;--pn:#1e1630;--ink:#f3eefb;--mut:#a79bbd;--ln:#3a2d52;--rec:#ff4f7b}
+*{box-sizing:border-box}
+body{margin:0;height:100vh;display:grid;grid-template-columns:1fr 340px;background:radial-gradient(900px 620px at 35% 45%,#2c1b48 0,var(--bg) 70%);color:var(--ink);font:15px/1.45 "Segoe UI Variable","Segoe UI",system-ui,sans-serif;overflow:hidden}
+.stage{display:grid;place-items:center;align-content:center;gap:8px;padding:20px;min-width:0}
+.ring{position:relative;width:min(100%,500px);aspect-ratio:1}
+canvas{width:100%;height:100%;display:block}
+#rb{position:absolute;left:50%;top:50%;width:34%;aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;border:0;background:var(--rec);cursor:pointer;display:grid;place-items:center;box-shadow:0 0 0 7px rgba(255,79,123,.22)}
+#rb::before{content:"";width:34%;aspect-ratio:1;background:#fff;border-radius:50%}
+#rb.on::before{border-radius:7px}
+#rb:focus-visible,.sm:focus-visible,.seg button:focus-visible{outline:3px solid #fff;outline-offset:3px}
+#tm{font:500 46px/1 ui-monospace,Consolas,monospace;font-variant-numeric:tabular-nums}
+#st{color:var(--mut);text-align:center;min-height:22px;max-width:480px}
+.opts{display:flex;gap:16px;align-items:center;flex-wrap:wrap;justify-content:center;color:var(--mut)}
+.seg{display:flex;border:1px solid var(--ln);border-radius:9px;overflow:hidden}
+.seg button{background:none;border:0;color:var(--mut);padding:7px 12px;cursor:pointer;font:inherit}
+.seg button.sel{background:var(--ln);color:var(--ink)}
+aside{background:var(--pn);border-left:1px solid var(--ln);display:grid;grid-template-rows:auto 1fr auto;min-height:0}
+.hd{padding:16px;border-bottom:1px solid var(--ln);display:grid;gap:8px}
+.hd h2{margin:0;font-size:17px}
+.path{color:var(--mut);font-size:12.5px;word-break:break-all}
+.sm{background:none;border:1px solid var(--ln);color:var(--ink);border-radius:8px;padding:6px 10px;cursor:pointer;font:inherit;font-size:13px}
+#ls{overflow:auto;padding:8px}
+.it{padding:10px 8px;border-radius:8px;display:grid;gap:6px}
+.it:hover{background:rgba(255,255,255,.05)}
+.it b{font-weight:600;word-break:break-all}
+.it small{color:var(--mut)}
+.ac{display:flex;gap:6px;flex-wrap:wrap}
+.empty{color:var(--mut);padding:16px}
+aside audio{width:100%;display:block;border-top:1px solid var(--ln)}
+@media(max-width:820px){body{grid-template-columns:1fr;height:auto;overflow:auto}aside{border-left:0;border-top:1px solid var(--ln);max-height:60vh}}
+</style></head><body>
+<section class="stage">
+ <div class="ring"><canvas id="cv" width="560" height="560"></canvas><button id="rb" aria-label="Aufnahme starten oder stoppen"></button></div>
+ <div id="tm">00:00</div>
+ <div id="st" role="status">Bereit. Nimmt den Ton vom PC auf, kein Video.</div>
+ <div class="opts"><div class="seg" id="fm"><button class="sel" data-f="webm">WebM (klein)</button><button data-f="wav">WAV (überall)</button></div>
+ <label><input type="checkbox" id="mic"> Mikrofon mitnehmen</label></div>
+</section>
+<aside><div class="hd"><h2>Ordner „Sound“</h2><div class="path" id="pa"></div><div><button class="sm" id="op">Ordner öffnen</button></div></div>
+<div id="ls"></div><audio id="pl" controls></audio></aside>
+<script>
+const $=i=>document.getElementById(i),pad=n=>String(n).padStart(2,'0'),fm=s=>pad(s/60|0)+':'+pad(s%60),say=t=>$('st').textContent=t;
+let fmt='webm',ctx,an,rec,chunks,streams=[],t0,tk,data=new Uint8Array(128);
+$('fm').onclick=e=>{const f=e.target.dataset.f;if(!f)return;fmt=f;[...$('fm').children].forEach(b=>b.classList.toggle('sel',b===e.target))};
+
+async function start(){
+ say('');let d;
+ try{d=await navigator.mediaDevices.getDisplayMedia({video:true,audio:true})}catch(e){say('Systemton nicht verfügbar: '+e.message);return}
+ const a=d.getAudioTracks();
+ if(!a.length){d.getTracks().forEach(t=>t.stop());say('Kein Systemton gefunden. Das klappt in dieser App nur unter Windows.');return}
+ streams=[d];ctx=new AudioContext();an=ctx.createAnalyser();an.fftSize=256;an.smoothingTimeConstant=.82;
+ const mix=ctx.createGain(),dest=ctx.createMediaStreamDestination();mix.connect(an);mix.connect(dest);
+ ctx.createMediaStreamSource(new MediaStream(a)).connect(mix);
+ if($('mic').checked){try{const m=await navigator.mediaDevices.getUserMedia({audio:true});streams.push(m);ctx.createMediaStreamSource(m).connect(mix)}catch(e){say('Mikrofon nicht verfügbar, nehme nur den PC-Ton auf.')}}
+ chunks=[];rec=new MediaRecorder(dest.stream,{mimeType:'audio/webm;codecs=opus'});
+ rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);rec.onstop=done;rec.start(1000);
+ t0=Date.now();tk=setInterval(()=>$('tm').textContent=fm((Date.now()-t0)/1000|0),250);
+ $('rb').classList.add('on');if(!$('st').textContent)say('Aufnahme läuft …');
+}
+function stop(){if(!rec||rec.state!=='recording')return;rec.stop();streams.forEach(s=>s.getTracks().forEach(t=>t.stop()))}
+async function done(){
+ clearInterval(tk);$('rb').classList.remove('on');an=null;ctx.close();say('Speichere …');
+ let buf=await new Blob(chunks).arrayBuffer(),ext='webm';
+ if(fmt==='wav'){try{buf=await toWav(buf);ext='wav'}catch(e){say('WAV-Umwandlung fehlgeschlagen, speichere als WebM.')}}
+ const n=new Date(),name=`Aufnahme ${n.getFullYear()}-${pad(n.getMonth()+1)}-${pad(n.getDate())} ${pad(n.getHours())}-${pad(n.getMinutes())}-${pad(n.getSeconds())}.${ext}`;
+ await sound.save(name,buf);say('Gespeichert: '+name);load();
+}
+async function toWav(ab){
+ const c=new AudioContext(),b=await c.decodeAudioData(ab);c.close();
+ const ch=Math.min(2,b.numberOfChannels),L=b.length,v=new DataView(new ArrayBuffer(44+L*ch*2)),w=(o,s)=>[...s].forEach((x,i)=>v.setUint8(o+i,x.charCodeAt(0)));
+ w(0,'RIFF');v.setUint32(4,36+L*ch*2,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,ch,true);
+ v.setUint32(24,b.sampleRate,true);v.setUint32(28,b.sampleRate*ch*2,true);v.setUint16(32,ch*2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,L*ch*2,true);
+ const d=[...Array(ch).keys()].map(i=>b.getChannelData(i));let o=44;
+ for(let i=0;i<L;i++)for(let k=0;k<ch;k++){const s=Math.max(-1,Math.min(1,d[k][i]));v.setInt16(o,s*(s<0?32768:32767),true);o+=2}
+ return v.buffer;
+}
+async function load(){
+ const l=await sound.list(),box=$('ls');box.textContent='';
+ if(!l.length){const e=document.createElement('div');e.className='empty';e.textContent='Noch keine Aufnahmen. Starte die erste mit dem Knopf.';box.append(e);return}
+ l.forEach(f=>{
+  const d=document.createElement('div');d.className='it';
+  const b=document.createElement('b');b.textContent=f.name;
+  const s=document.createElement('small');s.textContent=new Date(f.time).toLocaleString('de-DE')+' · '+(f.size/1048576).toFixed(1).replace('.',',')+' MB';
+  const a=document.createElement('div');a.className='ac';
+  const mk=(t,fn)=>{const x=document.createElement('button');x.className='sm';x.textContent=t;x.onclick=fn;a.append(x)};
+  mk('Abspielen',()=>{$('pl').src=f.url;$('pl').play()});
+  mk('Im Ordner zeigen',()=>sound.show(f.name));
+  mk('Löschen',async()=>{if(confirm('„'+f.name+'“ in den Papierkorb legen?')){await sound.del(f.name);load()}});
+  d.append(b,s,a);box.append(d);
+ });
+}
+const g=$('cv').getContext('2d');
+(function draw(){
+ g.clearRect(0,0,560,560);if(an)an.getByteFrequencyData(data);
+ const N=72,c=280,R=124;g.lineWidth=6;g.lineCap='round';
+ for(let k=0;k<N;k++){
+  const i=k<N/2?k:N-1-k,v=an?data[2+i*2]/255:0,h=6+Math.pow(v,1.3)*130,a=k/N*Math.PI*2-Math.PI/2;
+  g.strokeStyle=`hsl(${42-i*2.1} 95% 62%)`;g.beginPath();
+  g.moveTo(c+Math.cos(a)*R,c+Math.sin(a)*R);g.lineTo(c+Math.cos(a)*(R+h),c+Math.sin(a)*(R+h));g.stroke();
+ }
+ requestAnimationFrame(draw);
+})();
+$('rb').onclick=()=>rec&&rec.state==='recording'?stop():start();
+$('op').onclick=()=>sound.open();
+sound.dir().then(p=>$('pa').textContent=p);load();
+</script></body></html>
