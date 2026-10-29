@@ -1,0 +1,18 @@
+name: Windows-App bauen
+on: [push, workflow_dispatch]
+jobs:
+  win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - shell: bash
+        run: |
+          cd "$(dirname "$(find . -name package.json -not -path '*/node_modules/*' | head -1)")"
+          npm install
+          npm run dist
+          mkdir -p "$GITHUB_WORKSPACE/out"
+          cp dist/*.exe "$GITHUB_WORKSPACE/out/"
+      - uses: actions/upload-artifact@v4
+        with: { name: Sound-Rekorder-Windows, path: out/*.exe }
